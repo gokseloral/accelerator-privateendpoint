@@ -61,6 +61,10 @@ be done from ARM):
 > private-endpoint-locked account. A Power Platform Enterprise Policy linked
 > to a delegated subnet is the supported way to bridge that gap.
 
+## Solution architecture
+
+![Power Platform → VNet → Azure Content Understanding](docs/ppvnet-acu-solution-architecture.png)
+
 ## What gets deployed
 
 ```
