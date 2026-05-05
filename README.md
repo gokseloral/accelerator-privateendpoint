@@ -4,6 +4,57 @@ End-to-end accelerator for hosting **Azure AI Content Understanding** behind a
 **Private Endpoint** and consuming it from a **Power Platform** Managed
 Environment via **Enterprise Policy / VNet injection**.
 
+## One-click deploy
+
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fgokseloral%2Faccelerator-privateendpoint%2Fmain%2Finfra%2Fazuredeploy.json)
+[![Visualize](https://raw.githubusercontent.com/Azure/azure-quickstart-templates/master/1-CONTRIBUTION-GUIDE/images/visualizebutton.svg?sanitize=true)](http://armviz.io/#/?load=https%3A%2F%2Fraw.githubusercontent.com%2Fgokseloral%2Faccelerator-privateendpoint%2Fmain%2Finfra%2Fazuredeploy.json)
+
+The button above provisions everything in one resource group: VNet (primary +
+paired secondary), AI Services account with Private Endpoint, Private DNS
+zones, and the Power Platform Enterprise Policy resource.
+
+The portal will prompt for:
+
+| Parameter | Description | Example |
+| --- | --- | --- |
+| `baseName` | 3–11 chars, lowercase alphanumerics, used to derive resource names | `prvendcu` |
+| `location` | Primary Azure region (Content Understanding-supported) | `westus`, `swedencentral`, `australiaeast` |
+| `secondaryLocation` | Paired Azure region for the second PP-delegated subnet | `eastus` (paired with `westus`) |
+| `powerPlatformGeo` | PP geo for the Enterprise Policy resource location (NOT an Azure region) | `unitedstates`, `europe`, `asia`, `australia` |
+| `powerPlatformEnvironmentId` | GUID of the target PP environment (NOT the org URL) | `00000000-0000-0000-0000-000000000000` |
+| `vnetAddressPrefix` / `peSubnetPrefix` / `ppSubnetPrefix` | Primary VNet + subnet CIDRs | `10.50.0.0/16` / `10.50.1.0/24` / `10.50.2.0/24` |
+| `secondaryVnetAddressPrefix` / `secondaryPpSubnetPrefix` | Secondary VNet + delegated subnet CIDRs (must NOT overlap primary) | `10.51.0.0/16` / `10.51.2.0/24` |
+| `enterprisePolicyName` | Name of the `Microsoft.PowerPlatform/enterprisePolicies` resource | `ep-vnet-prvendcu` |
+
+Tenant ID, subscription ID, and the signed-in identity are taken from the
+portal session — you don't have to enter them.
+
+### Region pair reference
+
+Pick `secondaryLocation` from the [Azure paired regions list](https://learn.microsoft.com/azure/reliability/cross-region-replication-azure#azure-paired-regions). The paired region for each supported primary:
+
+| Primary (`location`) | Paired (`secondaryLocation`) | PP geo (`powerPlatformGeo`) |
+| --- | --- | --- |
+| `westus` | `eastus` | `unitedstates` |
+| `swedencentral` | `swedensouth` | `europe` |
+| `australiaeast` | `australiasoutheast` | `australia` |
+
+### After the ARM deployment finishes
+
+The ARM template stops at provisioning. To complete the integration, run the
+final linking step locally (it requires Power Platform admin auth which can't
+be done from ARM):
+
+```powershell
+# Copy .env.example -> .env, fill in PP_ENVIRONMENT_ID + PP_TENANT_ID
+./scripts/link-enterprise-policy.ps1 -UseDeviceCode
+./scripts/create-and-test-connector.ps1
+```
+
+---
+
+## Manual / scripted path
+
 > Why this matters: Azure AI Services lets you set `publicNetworkAccess=Disabled`,
 > but Power Platform is **not** a "trusted Microsoft service" for Cognitive
 > Services — `bypass=AzureServices` alone won't let Power Platform reach a
