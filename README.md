@@ -1,71 +1,31 @@
 # Azure Content Understanding behind Private Endpoint + Power Platform
 
-End-to-end accelerator for hosting **Azure AI Content Understanding** behind a
-**Private Endpoint** and consuming it from a **Power Platform** Managed
-Environment via **Enterprise Policy / VNet injection**.
+## Objective
 
-## One-click deploy
+Provide an end-to-end accelerator for hosting **Azure AI Content Understanding**
+behind a **Private Endpoint** (no public network access) and consuming it from
+a **Power Platform** Managed Environment via [Enterprise Policy / VNet
+injection](https://learn.microsoft.com/power-platform/admin/vnet-support-setup-configure?tabs=existing%2Csingle&pivots=powershell#setup-with-powershell).
 
-[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fgokseloral%2Faccelerator-privateendpoint%2Fmain%2Finfra%2Fazuredeploy.json)
-[![Visualize](https://raw.githubusercontent.com/Azure/azure-quickstart-templates/master/1-CONTRIBUTION-GUIDE/images/visualizebutton.svg?sanitize=true)](http://armviz.io/#/?load=https%3A%2F%2Fraw.githubusercontent.com%2Fgokseloral%2Faccelerator-privateendpoint%2Fmain%2Finfra%2Fazuredeploy.json)
+> Azure AI Services lets you set `publicNetworkAccess=Disabled`, but Power
+> Platform is **not** a "trusted Microsoft service" for Cognitive Services —
+> `bypass=AzureServices` alone won't let Power Platform reach a private-endpoint-locked
+> account. A Power Platform Enterprise Policy linked to a delegated subnet is
+> the supported way to bridge that gap.
 
-The button above provisions everything in one resource group: VNet (primary +
-paired secondary), AI Services account with Private Endpoint, Private DNS
-zones, and the Power Platform Enterprise Policy resource.
+What you get when you finish the steps below:
 
-The portal will prompt for:
+* `Microsoft.CognitiveServices/accounts` (kind `AIServices`) with `publicNetworkAccess=Disabled`, custom subdomain, and a Private Endpoint into a dedicated subnet.
+* Three Private DNS zones linked to the primary VNet:
+  `privatelink.cognitiveservices.azure.com`, `privatelink.openai.azure.com`,
+  `privatelink.services.ai.azure.com`.
+* Two delegated subnets in paired Azure regions for Power Platform VNet injection (multi-region PP geos like `unitedstates` require subnets in two regions).
+* `Microsoft.PowerPlatform/enterprisePolicies` (kind `vnet`) referencing both delegated subnets, linked to your Managed PP environment.
+* A Power Platform custom connector for the Content Understanding REST API plus a connectivity test.
 
-| Parameter | Description | Example |
-| --- | --- | --- |
-| `baseName` | 3–11 chars, lowercase alphanumerics, used to derive resource names | `prvendcu` |
-| `location` | Primary Azure region (Content Understanding-supported) | `westus`, `swedencentral`, `australiaeast` |
-| `secondaryLocation` | Paired Azure region for the second PP-delegated subnet | `eastus` (paired with `westus`) |
-| `powerPlatformGeo` | PP geo for the Enterprise Policy resource location (NOT an Azure region) | `unitedstates`, `europe`, `asia`, `australia` |
-| `powerPlatformEnvironmentId` | GUID of the target PP environment (NOT the org URL) | `00000000-0000-0000-0000-000000000000` |
-| `vnetAddressPrefix` / `peSubnetPrefix` / `ppSubnetPrefix` | Primary VNet + subnet CIDRs | `10.50.0.0/16` / `10.50.1.0/24` / `10.50.2.0/24` |
-| `secondaryVnetAddressPrefix` / `secondaryPpSubnetPrefix` | Secondary VNet + delegated subnet CIDRs (must NOT overlap primary) | `10.51.0.0/16` / `10.51.2.0/24` |
-| `enterprisePolicyName` | Name of the `Microsoft.PowerPlatform/enterprisePolicies` resource | `ep-vnet-prvendcu` |
-
-Tenant ID, subscription ID, and the signed-in identity are taken from the
-portal session — you don't have to enter them.
-
-### Region pair reference
-
-Pick `secondaryLocation` from the [Azure paired regions list](https://learn.microsoft.com/azure/reliability/cross-region-replication-azure#azure-paired-regions). The paired region for each supported primary:
-
-| Primary (`location`) | Paired (`secondaryLocation`) | PP geo (`powerPlatformGeo`) |
-| --- | --- | --- |
-| `westus` | `eastus` | `unitedstates` |
-| `swedencentral` | `swedensouth` | `europe` |
-| `australiaeast` | `australiasoutheast` | `australia` |
-
-### After the ARM deployment finishes
-
-The ARM template stops at provisioning. To complete the integration, run the
-final linking step locally (it requires Power Platform admin auth which can't
-be done from ARM):
-
-```powershell
-# Copy .env.example -> .env, fill in PP_ENVIRONMENT_ID + PP_TENANT_ID
-./scripts/link-enterprise-policy.ps1 -UseDeviceCode
-./scripts/create-and-test-connector.ps1
-```
-
----
-
-## Manual / scripted path
-
-> Why this matters: Azure AI Services lets you set `publicNetworkAccess=Disabled`,
-> but Power Platform is **not** a "trusted Microsoft service" for Cognitive
-> Services — `bypass=AzureServices` alone won't let Power Platform reach a
-> private-endpoint-locked account. A Power Platform Enterprise Policy linked
-> to a delegated subnet is the supported way to bridge that gap.
-
-## Solution architecture
+## Architecture
 
 ![Power Platform → VNet → Azure Content Understanding](docs/ppvnet-acu-solution-architecture.png)
-
-## What gets deployed
 
 ```
                                    ┌─ vnet-<base>          (region A, e.g. westus)
@@ -79,19 +39,13 @@ Power Platform Managed Env ───► Enterprise Policy (vnet)
                                        └─ snet-powerplatform   (delegated, paired)
 ```
 
-* `Microsoft.CognitiveServices/accounts` (kind `AIServices`), public network access **disabled**, Private Endpoint into `snet-pe`, custom subdomain enabled.
-* Three Private DNS zones linked to the primary VNet:
-  `privatelink.cognitiveservices.azure.com`, `privatelink.openai.azure.com`,
-  `privatelink.services.ai.azure.com`.
-* Two delegated subnets (in paired Azure regions) for Power Platform VNet injection — required by the multi-region Power Platform geos (e.g. `unitedstates` requires `westus` + `eastus`).
-* `Microsoft.PowerPlatform/enterprisePolicies` (kind `vnet`) referencing both delegated subnets.
-* Power Platform custom connector for the Content Understanding REST API.
-
-## Repo layout
+Repo layout:
 
 ```
 infra/
-  main.bicep                # VNet (primary + secondary), AI Services, PE, DNS
+  deploy.bicep              # one-click unified template (source of azuredeploy.json)
+  azuredeploy.json          # compiled ARM template used by the Deploy to Azure button
+  main.bicep                # modular VNet + AI Services + PE + DNS template
   main.bicepparam           # default address spaces (no env-specific values)
   enterprise-policy.bicep   # Microsoft.PowerPlatform/enterprisePolicies (vnet)
 powerplatform/
@@ -105,66 +59,98 @@ scripts/
 .env.example                       # copy to .env and fill in
 ```
 
-## Prerequisites
+## Getting Started
+
+### Video Walkthrough
+
+> 🎥 *Coming soon.* A short walkthrough of one-click deployment, linking the
+> Enterprise Policy, and validating connectivity from a Power Automate flow.
+
+### Prerequisites
 
 | Requirement | Notes |
 | --- | --- |
 | Azure subscription Owner / Contributor | RG, networking, AI Services, PE, DNS, Enterprise Policy |
-| Azure CLI ≥ `2.50` | older versions cannot accept some inline params |
-| PowerShell 7+ | `pwsh` |
+| Azure CLI ≥ `2.50` | only required for the scripted path |
+| PowerShell 7+ (`pwsh`) | for the helper scripts |
 | `pac` CLI signed in to the target PP environment | `pac auth list` |
 | `Microsoft.PowerPlatform.EnterprisePolicies` PowerShell module | auto-installed by `link-enterprise-policy.ps1` |
 | Power Platform / Global Administrator | required to enable Managed Environment + link the policy |
 | Target environment is a **Managed Environment** | Sandbox is not allowed; enable in PPAC |
 
-## Configure
+### Deployment
 
-Copy `.env.example` → `.env` and fill in the values for your tenant:
+You have two options. Pick **one** of them, then continue with the linking step.
 
-```ini
-AZURE_SUBSCRIPTION_ID=<sub guid>
-AZURE_RESOURCE_GROUP=rg-prvendtest
-AZURE_LOCATION=westus
-AZURE_SECONDARY_LOCATION=eastus
-BASE_NAME=prvendcu
+#### Option A — One-click ARM deploy (recommended)
 
-PP_TENANT_ID=<tenant guid>
-PP_ENVIRONMENT_ID=<env guid>          # NOT the org URL
-PP_GEO=unitedstates                   # PP geo for the policy resource
-ENTERPRISE_POLICY_NAME=ep-vnet-prvendcu
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fgokseloral%2Faccelerator-privateendpoint%2Fmain%2Finfra%2Fazuredeploy.json)
+[![Visualize](https://raw.githubusercontent.com/Azure/azure-quickstart-templates/master/1-CONTRIBUTION-GUIDE/images/visualizebutton.svg?sanitize=true)](http://armviz.io/#/?load=https%3A%2F%2Fraw.githubusercontent.com%2Fgokseloral%2Faccelerator-privateendpoint%2Fmain%2Finfra%2Fazuredeploy.json)
+
+The portal blade collects:
+
+| Parameter | Description | Example |
+| --- | --- | --- |
+| `baseName` | 3–11 chars, lowercase alphanumerics, used to derive resource names | `prvendcu` |
+| `location` | Primary Azure region (Content Understanding-supported) | `westus`, `swedencentral`, `australiaeast` |
+| `secondaryLocation` | Paired Azure region for the second PP-delegated subnet | `eastus` (paired with `westus`) |
+| `powerPlatformGeo` | PP geo for the Enterprise Policy resource location (NOT an Azure region) | `unitedstates`, `europe`, `asia`, `australia` |
+| `powerPlatformEnvironmentId` | GUID of the target PP environment (NOT the org URL) | `00000000-0000-0000-0000-000000000000` |
+| `vnetAddressPrefix` / `peSubnetPrefix` / `ppSubnetPrefix` | Primary VNet + subnet CIDRs | `10.50.0.0/16` / `10.50.1.0/24` / `10.50.2.0/24` |
+| `secondaryVnetAddressPrefix` / `secondaryPpSubnetPrefix` | Secondary VNet + delegated subnet CIDRs (must NOT overlap primary) | `10.51.0.0/16` / `10.51.2.0/24` |
+| `enterprisePolicyName` | Name of the `Microsoft.PowerPlatform/enterprisePolicies` resource | `ep-vnet-prvendcu` |
+
+Tenant ID, subscription ID, and the signed-in identity come from the portal
+session — you don't need to enter them.
+
+**Region-pair reference** (pick `secondaryLocation` from the [Azure paired regions list](https://learn.microsoft.com/azure/reliability/cross-region-replication-azure#azure-paired-regions)):
+
+| Primary (`location`) | Paired (`secondaryLocation`) | PP geo (`powerPlatformGeo`) |
+| --- | --- | --- |
+| `westus` | `eastus` | `unitedstates` |
+| `swedencentral` | `swedensouth` | `europe` |
+| `australiaeast` | `australiasoutheast` | `australia` |
+
+#### Option B — Scripted (`.env` + PowerShell)
+
+```powershell
+# 1. Copy .env.example -> .env and fill in the values for your tenant
+Copy-Item .env.example .env
+# edit .env (PP_ENVIRONMENT_ID, PP_TENANT_ID, AZURE_SUBSCRIPTION_ID, ...)
+
+# 2. Provision Azure infra + Enterprise Policy
+./scripts/deploy.ps1
 ```
 
 `.env` is gitignored; `.env.example` is the only file checked in.
 
-## Run
+#### Final step — link the Enterprise Policy to your PP environment
+
+The ARM template (and the scripted path) stops at provisioning. Linking the
+policy to the Power Platform environment requires Power Platform admin auth
+that ARM cannot perform, so it runs locally:
 
 ```powershell
-# 1. Provision Azure infra + Enterprise Policy (reads .env)
-./scripts/deploy.ps1
-
-# 2. Link the Enterprise Policy to the Managed PP environment
-#    (interactive Az sign-in; add -UseDeviceCode if no browser popup appears)
-./scripts/link-enterprise-policy.ps1
-
-# 3. Push custom connector + run the connectivity test
-./scripts/create-and-test-connector.ps1
+# Make sure .env has PP_ENVIRONMENT_ID and PP_TENANT_ID set
+./scripts/link-enterprise-policy.ps1 -UseDeviceCode
 ```
 
-`deploy.ps1` writes a local `scripts/deployment-outputs.json` that the other
-scripts consume. That file is gitignored because it contains real resource
-IDs and hostnames.
-
-To unlink the policy (e.g. before changing the policy's subnets):
+To unlink later (e.g. before changing the policy's subnets):
 
 ```powershell
 ./scripts/link-enterprise-policy.ps1 -Unlink
 ```
 
-## Connectivity test semantics
+## Testing
 
-`create-and-test-connector.ps1` calls
-`GET /contentunderstanding/analyzers?api-version=<preview>` directly against
-the AI Services endpoint:
+### 1. Push the custom connector + run the connectivity check
+
+```powershell
+./scripts/create-and-test-connector.ps1
+```
+
+The script calls `GET /contentunderstanding/analyzers?api-version=<preview>`
+directly against the AI Services endpoint and reports the result:
 
 | Run from | Expected | Meaning |
 | --- | --- | --- |
@@ -176,7 +162,7 @@ the AI Services endpoint:
 > through the connector authoring host (`*.azure-apihub.net`) and **does not
 > use VNet injection**. Always validate from a real flow run.
 
-## Verifying the Enterprise Policy link
+### 2. Verify the Enterprise Policy link
 
 ```powershell
 . ./scripts/load-env.ps1
@@ -189,25 +175,32 @@ Invoke-RestMethod -Uri $uri -Headers @{ Authorization = "Bearer $tok" } |
 
 `linkStatus: Linked` indicates the policy is active.
 
-## Troubleshooting
+### 3. End-to-end test from a Power Automate flow
+
+1. In the linked PP environment, create a flow with an **Instant** trigger.
+2. Add an action from the custom connector (e.g. **List Analyzers**).
+3. Create a new connection — supply the Cognitive Services key as the API key.
+4. Run the flow. A `200` response confirms Power Platform → delegated subnet → Private Endpoint → Azure AI Services is fully wired.
+
+### Troubleshooting
 
 | Symptom | Likely cause / fix |
 | --- | --- |
 | `404` from `enterprisePolicies/vnet/link` | Environment is not a Managed Environment yet. Enable it in PPAC, then re-run. |
-| `Environment location 'unitedstates' does not match the enterprise policy location 'westus'` | The Enterprise Policy resource's `location` must be the PP geo (`unitedstates`), not an Azure region. The provided Bicep handles this; redeploy if you set it manually. |
+| `Environment location 'unitedstates' does not match the enterprise policy location 'westus'` | The Enterprise Policy resource's `location` must be the PP geo (`unitedstates`), not an Azure region. The provided template handles this; redeploy if you set it manually. |
 | `EnterprisePolicyUpdateNotAllowed` when redeploying the policy | Policy is currently linked to an environment. Run `link-enterprise-policy.ps1 -Unlink`, redeploy, then re-link. |
 | Custom connector test from PP flow returns `403 ThrowExceptionDueToTrafficDenied` | Connection cached from before the policy link. Delete the connection (Power Apps → Connections), re-create it, retry. |
 | Custom connector doesn't appear in flow designer's **Custom** tab | Add the connector to a Dataverse solution (`pac connector update --solution-unique-name <name>`), then refresh. |
 
-## Cleanup
+### Cleanup
 
 ```powershell
 ./scripts/link-enterprise-policy.ps1 -Unlink
 az group delete -n $env:AZURE_RESOURCE_GROUP --yes --no-wait
 ```
 
-## License / disclaimer
+---
 
 Sample code provided as-is, no warranty. Review and adapt for production use
-(naming conventions, resource tags, RBAC, diagnostic settings, address space
+(naming conventions, resource tags, RBAC, diagnostic settings, address-space
 planning, etc.).
