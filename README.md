@@ -160,10 +160,13 @@ $tok = az account get-access-token --resource 'https://service.powerapps.com/' -
 $uri = "https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments/$env:PP_ENVIRONMENT_ID" + '?api-version=2019-10-01&$expand=properties.enterprisePolicies'
 Invoke-RestMethod -Uri $uri -Headers @{ Authorization = "Bearer $tok" } |
   Select-Object -ExpandProperty properties |
-  Select-Object -ExpandProperty enterprisePolicies
+  Select-Object -ExpandProperty enterprisePolicies |
+  ConvertTo-Json -Depth 10
 ```
 
-`linkStatus: Linked` indicates the policy is active.
+Look for `"linkStatus": "Linked"` inside the `vNets` object — that confirms
+the policy is bound to the environment. (PowerShell's default table view
+truncates this nested field, so we pipe to `ConvertTo-Json` to see it in full.)
 
 ### 3. End-to-end test from a Power Automate flow
 
