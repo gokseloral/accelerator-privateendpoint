@@ -27,18 +27,6 @@ What you get when you finish the steps below:
 
 ![Power Platform → VNet → Azure Content Understanding](docs/ppvnet-acu-solution-architecture.png)
 
-```
-                                   ┌─ vnet-<base>          (region A, e.g. westus)
-                                   │   ├─ snet-pe          ──► Private Endpoint
-                                   │   │                       to Azure AI Services
-                                   │   └─ snet-powerplatform   (delegated)
-                                   │
-Power Platform Managed Env ───► Enterprise Policy (vnet)
-                                   │
-                                   └─ vnet-<base>-sec      (region B, e.g. eastus)
-                                       └─ snet-powerplatform   (delegated, paired)
-```
-
 Repo layout:
 
 ```
@@ -65,6 +53,8 @@ scripts/
 
 > 🎥 *Coming soon.* A short walkthrough of one-click deployment, linking the
 > Enterprise Policy, and validating connectivity from a Power Automate flow.
+>
+> Speaker script / transcript: [docs/video-walkthrough.md](docs/video-walkthrough.md).
 
 ### Prerequisites
 
